@@ -1,0 +1,7 @@
+﻿services:
+  drivo-backend:
+    image: drivo-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+
