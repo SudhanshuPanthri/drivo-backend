@@ -1,6 +1,9 @@
 using drivo_backend.Contracts.Auth;
+using drivo_backend.Domain.Entities;
 using drivo_backend.Infrastructure.Authentication;
+using drivo_backend.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace drivo_backend.Controllers;
 
@@ -10,18 +13,19 @@ public class AuthController : ControllerBase
 {
     private readonly IJwtService _jwtService;
     private readonly ILogger<AuthController> _logger;
-    private static readonly List<AppUser> _users=new();
+    private readonly AppDbContext _dbContext;
 
-    public AuthController(IJwtService jwtService, ILogger<AuthController> logger)
+    public AuthController(IJwtService jwtService, ILogger<AuthController> logger, AppDbContext dbContext)
     {
         _jwtService=jwtService;
         _logger=logger;
+        _dbContext=dbContext;
     }
 
     [HttpPost("login")]
-    public IActionResult Login([FromBody] LoginRequest request)
+    public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
-        var user=_users.FirstOrDefault(u=>u.Email.Equals(request.Email,StringComparison.OrdinalIgnoreCase));
+        var user=await _dbContext.Users.FirstOrDefaultAsync(u=>u.Email.ToLower()==request.Email.ToLower());
 
         if(user==null || !VerifyPassword(request.Password, user.PasswordHash))
         {
@@ -32,6 +36,16 @@ public class AuthController : ControllerBase
 
         var refreshToken=_jwtService.GenerateRefreshToken();
         var refreshTokenExpiry=_jwtService.GetRefreshTokenExpiryTime();
+
+        _dbContext.RefreshTokens.Add(new RefreshToken
+        {
+            Id=Guid.NewGuid(),
+            Token=refreshToken,
+            UserId=user.Id,
+            ExpiresAt=refreshTokenExpiry,
+            CreatedAt=DateTime.UtcNow
+        });
+        await _dbContext.SaveChangesAsync();
 
         var response= new AuthResponse
         {
@@ -53,19 +67,19 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("register")]
-    public IActionResult Register([FromBody] RegisterRequest request)
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
         if (request.Password != request.ConfirmPassword)
         {
             return BadRequest(new {message="Passwords do not match"});
         }
 
-        if (_users.Any(u => u.Email.Equals(request.Email, StringComparison.OrdinalIgnoreCase)))
+        if (await _dbContext.Users.AnyAsync(u => u.Email.ToLower()==request.Email.ToLower()))
         {
             return Conflict(new {message="Email Already registered"});
         }
 
-        var user =new AppUser
+        var user =new User
         {
             Id=Guid.NewGuid(),
             FirstName=request.FirstName,
@@ -76,27 +90,68 @@ public class AuthController : ControllerBase
             CreatedAt=DateTime.UtcNow
         };
 
-        _users.Add(user);
+        _dbContext.Users.Add(user);
+        await _dbContext.SaveChangesAsync();
 
-        return Login(new LoginRequest
+        return await Login(new LoginRequest
         {
             Email=request.Email,
             Password=request.Password
         });
+
+    }
+
+    [HttpPost("refresh")]
+    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
+    {
+        var refreshToken=await _dbContext.RefreshTokens.Include(rt=>rt.User).FirstOrDefaultAsync(rt=>rt.Token==request.RefreshToken);
+
+        if(refreshToken==null || !refreshToken.IsActive)
+        {
+            return Unauthorized(new {message="Invalid refresh Token"});
+        }
+
+        refreshToken.RevokedAt=DateTime.UtcNow;
+
+        var newAccessToken=_jwtService.GenerateAccessToken(refreshToken.User.Id,refreshToken.User.Email,refreshToken.User.FirstName,refreshToken.User.LastName);
+
+        var newRefreshToken=_jwtService.GenerateRefreshToken();
+        var newRefreshTokenExpiryTime=_jwtService.GetRefreshTokenExpiryTime();
+
+        _dbContext.RefreshTokens.Add(new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            Token = newRefreshToken,
+            UserId = refreshToken.User.Id,
+            ExpiresAt = newRefreshTokenExpiryTime,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _dbContext.SaveChangesAsync();
+
+        return Ok(new AuthResponse
+        {
+            AccessToken = newAccessToken,
+            RefreshToken = newRefreshToken,
+            TokenType = "Bearer",
+            ExpiresIn = 3600,
+            User = new UserDTO
+            {
+                Id = refreshToken.User.Id,
+                FirstName = refreshToken.User.FirstName,
+                LastName = refreshToken.User.LastName,
+                Email = refreshToken.User.Email,
+                PhoneNumber = refreshToken.User.PhoneNumber
+            }
+        });
+    }
+
+    public class RefreshTokenRequest
+    {
+        public string RefreshToken { get; set; } = string.Empty;
     }
 
     private string HashPassword(string password)=>BCrypt.Net.BCrypt.HashPassword(password);
     private bool VerifyPassword(string password,string hash)=>BCrypt.Net.BCrypt.Verify(password,hash);
 
-
-    private class AppUser
-    {
-        public Guid Id {get;set;}
-        public string FirstName {get;set;}=string.Empty;
-        public string LastName {get;set;}=string.Empty;
-        public string Email {get;set;}=string.Empty;
-        public string PhoneNumber {get;set;}=string.Empty;
-        public string PasswordHash {get;set;}=string.Empty;
-        public DateTime CreatedAt {get;set;}
-    }
 }

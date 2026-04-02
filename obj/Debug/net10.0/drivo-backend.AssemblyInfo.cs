@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("drivo-backend")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+376d292da594d97ce8886801d6e570865b0d0b8a")]
 [assembly: System.Reflection.AssemblyProductAttribute("drivo-backend")]
 [assembly: System.Reflection.AssemblyTitleAttribute("drivo-backend")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
