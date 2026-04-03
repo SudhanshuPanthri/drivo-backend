@@ -1,3 +1,4 @@
+using drivo_backend.Configuration;
 using drivo_backend.Contracts.Auth;
 using drivo_backend.Domain.Entities;
 using drivo_backend.Infrastructure.Authentication;
@@ -14,12 +15,14 @@ public class AuthController : ControllerBase
     private readonly IJwtService _jwtService;
     private readonly ILogger<AuthController> _logger;
     private readonly AppDbContext _dbContext;
+    private readonly JwtSettings _jwtSettings;
 
-    public AuthController(IJwtService jwtService, ILogger<AuthController> logger, AppDbContext dbContext)
+    public AuthController(IJwtService jwtService, ILogger<AuthController> logger, AppDbContext dbContext, JwtSettings jwtSettings)
     {
         _jwtService=jwtService;
         _logger=logger;
         _dbContext=dbContext;
+        _jwtSettings=jwtSettings;
     }
 
     [HttpPost("login")]
@@ -52,7 +55,7 @@ public class AuthController : ControllerBase
             AccessToken=accessToken,
             RefreshToken=refreshToken,
             TokenType="Bearer",
-            ExpiresIn=3600,
+            ExpiresIn=_jwtSettings.AccessTokenExpiryMinutes,
             User=new UserDTO
             {
                 Id=user.Id,
@@ -146,11 +149,20 @@ public class AuthController : ControllerBase
         });
     }
 
-    public class RefreshTokenRequest
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
     {
-        public string RefreshToken { get; set; } = string.Empty;
-    }
+        var refreshToken=await _dbContext.RefreshTokens.FirstOrDefaultAsync(x=>x.Token==request.RefreshToken);
 
+        if (refreshToken != null)
+        {
+            refreshToken.RevokedAt=DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync();
+        }
+
+        return Ok(new {message="Logged out successfully"});
+    }
+    
     private string HashPassword(string password)=>BCrypt.Net.BCrypt.HashPassword(password);
     private bool VerifyPassword(string password,string hash)=>BCrypt.Net.BCrypt.Verify(password,hash);
 

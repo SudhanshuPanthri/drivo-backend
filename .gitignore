@@ -1,5 +1,5 @@
 **/appsettings.Development.json
 **/appsettings.*.json
 **/secrets.json
-bin
-obj
+bin/
+obj/
